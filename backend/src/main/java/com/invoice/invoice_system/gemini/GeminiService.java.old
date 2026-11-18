@@ -1,0 +1,96 @@
+package com.invoice.invoice_system.gemini;
+
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import org.springframework.stereotype.Service;
+
+import com.invoice.invoice_system.config.GeminiConfig;
+import com.invoice.invoice_system.entity.Invoice;
+import com.invoice.invoice_system.repository.InvoiceRepository;
+
+@Service
+public class GeminiService {
+
+    private final InvoiceRepository invoiceRepository;
+    private final GeminiConfig geminiConfig;
+    private final GeminiApiService geminiApiService;
+
+    public GeminiService(
+            InvoiceRepository invoiceRepository,
+            GeminiConfig geminiConfig,
+            GeminiApiService geminiApiService) {
+
+        this.invoiceRepository = invoiceRepository;
+        this.geminiConfig = geminiConfig;
+        this.geminiApiService = geminiApiService;
+    }
+
+    public Invoice extractInvoiceData(String pdfText) {
+
+        String response =
+                geminiApiService.askGemini(pdfText);
+
+        System.out.println("GEMINI RESPONSE:");
+        System.out.println(response);
+
+        if (response == null ||
+                response.startsWith("GEMINI_ERROR")) {
+
+            throw new RuntimeException(response);
+        }
+
+        String invoiceNumber = extractValue(
+                response,
+                "invoiceNumber\\\\\"\\s*:\\s*\\\\\"([^\\\\\"]+)");
+
+        String supplierName = extractValue(
+                response,
+                "supplierName\\\\\"\\s*:\\s*\\\\\"([^\\\\\"]+)");
+
+        String amountText = extractValue(
+                response,
+                "totalAmount\\\\\"\\s*:\\s*(\\d+)");
+
+        if (invoiceNumber.isEmpty() ||
+                supplierName.isEmpty()) {
+
+            throw new RuntimeException(
+                    "Gemini could not extract invoice data from this PDF.");
+        }
+
+        Invoice invoice = new Invoice();
+
+        invoice.setInvoiceNumber(invoiceNumber);
+        invoice.setSupplierName(supplierName);
+
+        if (amountText == null || amountText.isEmpty()) {
+
+            invoice.setTotalAmount(0.0);
+
+        } else {
+
+            invoice.setTotalAmount(
+                    Double.parseDouble(amountText));
+        }
+
+        invoice.setStatus("PROCESSED");
+
+        return invoiceRepository.save(invoice);
+    }
+
+    private String extractValue(
+            String text,
+            String regex) {
+
+        Pattern pattern = Pattern.compile(regex);
+
+        Matcher matcher = pattern.matcher(text);
+
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+
+        return "";
+    }
+}
